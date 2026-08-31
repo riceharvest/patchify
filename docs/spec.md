@@ -1,53 +1,47 @@
 # Specification
 
-This document is normative for the `recurlsively` command. Behavior not specified here is not promised by the current release.
+This document is normative for the `patchify` command. Behavior not specified here is not promised by the current release.
 
 ## Command contract
 
-The command accepts `recurlsively [crawl] <START_URL>`. The `crawl` word is optional for compatibility with the planned subcommand layout. `--help` and `--version` succeed without a URL. Other invocations require exactly one start URL.
+`patchify` reads a `BatchRequest` JSON document from stdin (or `--input FILE`) and writes a single `BatchResult` JSON document to stdout. `--help` and `--version` succeed without input. Empty or unparseable input exits with code 2.
 
-The first slice validates HTTP and HTTPS URLs, rejects whitespace and missing hosts, rejects URL userinfo, and rejects obvious localhost/LAN IPv4 targets by default. `--allow-private-network` is an explicit unsafe opt-in for trusted local fixtures and local documentation. DNS resolution and complete special-address validation belong to the fetcher and must remain deny-by-default.
+## Request contract
 
-Invalid arguments or configuration produce a human-readable error and a non-zero exit status. Help and version are written to standard output. The current successful run only validates configuration; fetching is not implemented.
+- `edits[]`: `{path, old_string, new_string, replace_all?}`. Applied in order. `old_string` must occur exactly once in the target file unless `replace_all: true`; zero or multiple matches fail the batch. `old_string` must be non-empty. Exact byte matching, no regex.
+- `writes[]`: `{path, content, create_dirs?}`. Create or overwrite files; parent directories created when `create_dirs` (default true). Duplicate paths: last write wins.
+- `verify[]`: `{cmd}`. Shell commands run after all edits and writes land, via `sh -c` (Windows: `cmd /C`) with the working directory as cwd. stdout/stderr capped at 4000 chars in output.
+- `dry_run: true`: validate and return diff previews without writing anything.
+- `allow_outside: true`: unsafe opt-in permitting absolute paths and targets outside the working directory.
 
 ## Defaults
 
 | Option | Default |
 | --- | --- |
-| `--output` | `./recurlsively-out` |
-| `--max-depth` | `3` (`0` means start only) |
-| `--max-pages` | `1000` |
-| `--concurrency` | `8` |
-| `--per-host-concurrency` | `2` |
-| `--delay` | `250ms` |
-| `--timeout` | `30s` |
-| `--retries` | `2` |
-| `--max-body-size` | `10MiB` |
-| `--max-total-bytes` | `500MiB` |
-| `--query-mode` | `drop` |
-| `--redirect-policy` | `same-origin` |
-| `--sitemap` | `auto` |
-| `--report` | `text` |
-| `--progress` | `auto` |
+| max edits per call | 50 |
+| max writes per call | 50 |
+| max target file size | 5 MiB |
+| max string payload | 2 MiB |
+| verify stdout/stderr cap | 4000 chars each |
+| `dry_run` | false |
+| `allow_outside` | false |
 
-Counts and byte budgets must be greater than zero, per-host concurrency must not exceed global concurrency, timeout must be positive, and the per-response body limit must not exceed the total byte budget. Zero is valid for depth and retries; zero delay is accepted by the parser for local tests.
+## Atomicity and rollback
 
-## Policy vocabulary
+The batch is all-or-nothing. All edits are matched against pre-read file contents before anything is written (pre-flight). Any failure — match count violation, missing target, oversized file, refused path — aborts before writing where possible and otherwise rolls back every prior applied edit/write in reverse order, restoring original bytes. `status` reports `applied`, `rolled_back`, or `dry_run`.
 
-- Query mode: `drop` or `preserve`.
-- Redirect policy: `same-origin` in the MVP contract.
-- Sitemap mode: `auto`, `on`, or `off`.
-- Report format: `text` or `json`.
-- Progress mode: `auto`, `text`, `json`, or `none`.
-- Durations: integer `ms`, `s`, or `m` values.
-- Byte sizes: integer `B`, `KiB`, `MiB`, or `GiB` values.
+## Path safety
 
-## MVP boundaries
+Relative paths must not contain `..` components. Absolute paths are refused unless `allow_outside` is set. Symlinked targets are resolved (up to 8 hops) and refused if they escape the working directory unless `allow_outside` is set. A TOCTOU guard re-reads each file immediately before writing and aborts on drift.
 
-The MVP fetches only HTTP(S) resources and produces Markdown snapshots. JavaScript execution, browser automation, authentication/session capture, arbitrary assets, and cross-origin crawling are out of scope. Robots handling, sitemap discovery, redirects, query normalization, and link extraction must be explicit and testable when implemented.
+## Exit codes
 
-The implementation must not silently weaken bounds, origin checks, or private-network protection. Any unsafe opt-in must be visible in help and documentation.
+| Code | Meaning |
+| --- | --- |
+| 0 | All edits and writes applied |
+| 1 | Batch rolled back, invalid request, or dry-run found failures |
+| 2 | Usage/IO error (empty stdin, unreadable input) |
 
 ## Compatibility
 
-The supported host targets are Linux, macOS, and Windows. The command-line names and defaults in this document are public contract; changes require updating tests and this specification together.
+The supported host targets are Linux, macOS, and Windows. The CLI flag names, request/response schemas, and exit codes in this document are public contract; changes require updating tests and this specification together.

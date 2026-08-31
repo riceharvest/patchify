@@ -26,6 +26,8 @@ serde_json = "1"
 anyhow = "1"
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+clap_mangen = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls","gzip","http2","json"] }
 sha2 = "0.10"
 url = "2.5"

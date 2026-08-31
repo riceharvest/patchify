@@ -1,7 +1,7 @@
-# Installing recurlsively
+# Installing patchify
 
 Prebuilt binaries are published on the
-[GitHub Releases](https://github.com/riceharvest/recurlsively/releases) page
+[GitHub Releases](https://github.com/riceharvest/patchify/releases) page
 for every tagged version. You do not need Rust installed.
 
 ## One-line install
@@ -9,13 +9,13 @@ for every tagged version. You do not need Rust installed.
 macOS / Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/riceharvest/recurlsively/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/riceharvest/patchify/main/install.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/riceharvest/recurlsively/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/riceharvest/patchify/main/install.ps1 | iex
 ```
 
 The installer detects your OS and architecture, downloads the matching
@@ -26,13 +26,22 @@ partial install on any failure.
 Pin a specific version:
 
 ```sh
-RECURSIVELY_VERSION=v0.1.0 sh install.sh        # macOS / Linux
-$env:RECURSIVELY_VERSION = "v0.1.0"; irm .../install.ps1 | iex   # Windows
+PATCHIFY_VERSION=v0.1.0 sh install.sh        # macOS / Linux
+$env:PATCHIFY_VERSION = "v0.1.0"; irm .../install.ps1 | iex   # Windows
 ```
+
+## Update an existing install
+
+```sh
+patchify --update
+```
+
+Self-update downloads the latest release, verifies its SHA-256 checksum,
+and atomically replaces the running binary.
 
 ## Manual install
 
-1. Download `recurlsively-<version>-<target>.tar.gz` (or `.zip` on Windows)
+1. Download `patchify-<version>-<target>.tar.gz` (or `.zip` on Windows)
    from the releases page for your platform:
 
    | Target | Platform |
@@ -56,8 +65,8 @@ $env:RECURSIVELY_VERSION = "v0.1.0"; irm .../install.ps1 | iex   # Windows
 ## Build from source
 
 ```sh
-git clone https://github.com/riceharvest/recurlsively
-cd recurlsively
+git clone https://github.com/riceharvest/patchify
+cd patchify
 cargo install --path .
 ```
 

@@ -1,0 +1,118 @@
+{
+  "description": "Batch edits + writes + verify commands in one atomic tool call. Edits apply in order with exact-string matching and rollback on any mismatch.",
+  "exit_codes": {
+    "0": "all edits and writes applied",
+    "1": "rolled back, failed, or invalid request",
+    "2": "usage / IO error (no JSON, unreadable input)"
+  },
+  "input": {
+    "properties": {
+      "allow_outside": {
+        "default": false,
+        "type": "boolean"
+      },
+      "dry_run": {
+        "default": false,
+        "type": "boolean"
+      },
+      "edits": {
+        "items": {
+          "properties": {
+            "new_string": {
+              "type": "string"
+            },
+            "old_string": {
+              "description": "must match exactly once unless replace_all",
+              "type": "string"
+            },
+            "path": {
+              "description": "relative path (absolute refused unless allow_outside)",
+              "type": "string"
+            },
+            "replace_all": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "path",
+            "old_string",
+            "new_string"
+          ],
+          "type": "object"
+        },
+        "maxItems": 50,
+        "type": "array"
+      },
+      "verify": {
+        "items": {
+          "properties": {
+            "cmd": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "cmd"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "writes": {
+        "items": {
+          "properties": {
+            "content": {
+              "type": "string"
+            },
+            "create_dirs": {
+              "default": true,
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ],
+          "type": "object"
+        },
+        "maxItems": 50,
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "limits": {
+    "max_edits": 50,
+    "max_file_bytes": 5242880,
+    "max_string_bytes": 2097152,
+    "max_writes": 50
+  },
+  "name": "patchify",
+  "output": {
+    "edits": [
+      {
+        "applied": true,
+        "diff_preview": "...",
+        "error": null,
+        "ok": true,
+        "path": "...",
+        "replacements": 1
+      }
+    ],
+    "status": "applied|rolled_back|dry_run",
+    "verify": [
+      {
+        "cmd": "...",
+        "duration_ms": 12,
+        "exit": 0,
+        "stderr": "...",
+        "stdout": "..."
+      }
+    ],
+    "writes": "[...]"
+  },
+  "version": "0.1.0"
+}
