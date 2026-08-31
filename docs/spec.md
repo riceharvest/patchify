@@ -4,7 +4,7 @@ This document is normative for the `patchify` command. Behavior not specified he
 
 ## Command contract
 
-`patchify` reads a `BatchRequest` JSON document from stdin (or `--input FILE`; `--input -` reads stdin explicitly) and writes a single `BatchResult` JSON document to stdout. `--help` and `--version` succeed without input. Empty or unparseable input exits with code 2.
+`patchify` reads a `BatchRequest` JSON document from stdin (or `--input FILE`; `--input -` reads stdin explicitly) and writes a single result to stdout: a `BatchResult` JSON document (default), a human-readable text summary (`--format text`), or a unified diff view (`--diff`, implies dry-run). `--help` and `--version` succeed without input. Empty or unparseable input exits with code 2.
 
 ## Request contract
 
