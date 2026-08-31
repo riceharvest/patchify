@@ -132,8 +132,9 @@ and every per-edit status explains what happened — no re-reading needed.
 ## Testing
 
 ```sh
-cargo test          # 15 unit + 7 CLI integration tests, no network
+cargo test          # 21 unit + 11 CLI integration tests, no network
 cargo check --all-targets
+cargo clippy --all-targets   # 0 warnings
 ```
 
 ## Pre-commit hook
