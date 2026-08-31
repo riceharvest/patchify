@@ -36,7 +36,7 @@ The batch is all-or-nothing. All edits are matched against pre-read file content
 
 ## Path safety
 
-Relative paths must not contain `..` components. Absolute paths are refused unless `allow_outside` is set. Symlinked targets are resolved (up to 8 hops) and refused if they escape the working directory unless `allow_outside` is set. A TOCTOU guard re-reads each file immediately before writing and aborts on drift.
+Relative paths must not contain `..` components. Absolute paths are refused unless `allow_outside` is set. Symlinked targets are resolved (up to 8 hops) and refused if they escape the working directory unless `allow_outside` is set. A TOCTOU guard re-reads each file immediately before writing and aborts on drift. The check-write sequence is protected by an exclusive advisory `flock` on a `<file>.patchify-lock` sidecar; concurrent patchify instances serialize, and the lock sidecar is removed on release.
 
 ## Exit codes
 
