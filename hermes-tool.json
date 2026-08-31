@@ -9,28 +9,33 @@
     "properties": {
       "allow_outside": {
         "default": false,
+        "description": "UNSAFE: permit absolute paths and symlink escapes outside the working directory",
         "type": "boolean"
       },
       "dry_run": {
         "default": false,
+        "description": "validate + return diff previews, write nothing",
         "type": "boolean"
       },
       "edits": {
+        "description": "exact-string edits applied in order; multiple edits to the same path compose (each matches the previous edit's result); first mismatch rolls back the whole batch",
         "items": {
           "properties": {
             "new_string": {
+              "description": "replacement literal; max 2MiB; empty string = deletion",
               "type": "string"
             },
             "old_string": {
-              "description": "must match exactly once unless replace_all",
+              "description": "exact literal text to find; must occur exactly once unless replace_all; non-empty; max 2MiB; NOT a regex",
               "type": "string"
             },
             "path": {
-              "description": "relative path (absolute refused unless allow_outside)",
+              "description": "path relative to cwd; absolute and ../ refused unless allow_outside",
               "type": "string"
             },
             "replace_all": {
               "default": false,
+              "description": "replace every occurrence instead of requiring exactly one",
               "type": "boolean"
             }
           },
@@ -45,9 +50,11 @@
         "type": "array"
       },
       "verify": {
+        "description": "shell commands run after edits+writes land; use for cargo check / git diff --stat so one call covers patch+verify",
         "items": {
           "properties": {
             "cmd": {
+              "description": "run via sh -c in the working directory; verify failure does NOT roll back edits",
               "type": "string"
             }
           },
@@ -59,16 +66,20 @@
         "type": "array"
       },
       "writes": {
+        "description": "create or overwrite whole files; applied AFTER edits; duplicate paths: last wins",
         "items": {
           "properties": {
             "content": {
+              "description": "full file content; max 2MiB",
               "type": "string"
             },
             "create_dirs": {
               "default": true,
+              "description": "mkdir -p missing parent directories",
               "type": "boolean"
             },
             "path": {
+              "description": "path relative to cwd",
               "type": "string"
             }
           },
@@ -114,5 +125,5 @@
     ],
     "writes": "[...]"
   },
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

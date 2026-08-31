@@ -1,6 +1,6 @@
 #!/bin/sh
-# recurlsively installer — POSIX, fail-closed.
-# Usage: curl -fsSL https://raw.githubusercontent.com/riceharvest/recurlsively/main/install.sh | sh
+# patchify installer — POSIX, fail-closed.
+# Usage: curl -fsSL https://raw.githubusercontent.com/riceharvest/patchify/main/install.sh | sh
 # Override version: PATCHIFY_VERSION=v0.1.0 sh install.sh
 set -eu
 

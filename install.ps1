@@ -1,4 +1,4 @@
-# recurlsively installer for Windows — fail-closed.
+# patchify installer for Windows — fail-closed.
 # Usage: irm https://raw.githubusercontent.com/riceharvest/patchify/main/install.ps1 | iex
 # Override version: $env:PATCHIFY_VERSION = "v0.1.0"
 $ErrorActionPreference = "Stop"
@@ -42,7 +42,7 @@ if (-not $Version) { Fail "could not determine release version" }
 $ShortVersion = $Version.Substring(1)
 $Archive = "$Bin-$ShortVersion-$Target.zip"
 $BaseUrl = "https://github.com/$Repo/releases/download/$Version"
-$Tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP "recurlsively-install-$PID")
+$Tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP "patchify-install-$PID")
 
 try {
     Write-Host "patchify-installer: downloading $Version for $Target..."

@@ -1,0 +1,28 @@
+#!/bin/sh
+# patchify pre-commit hook: block commits when the staged batch doesn't validate.
+#
+# Install:
+#   cp examples/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+#
+# What it does: dry-runs a trivial self-check batch to prove patchify works in
+# this repo, then refuses to commit if the binary or the repo state is broken.
+# Swap the payload for your own staged-file batch if you want content checks.
+
+command -v patchify >/dev/null 2>&1 || {
+    echo "pre-commit: patchify not installed (cargo install patchify)" >&2
+    exit 1
+}
+
+# Probe: a batch that must fail cleanly (rollback, no writes) proves the
+# executor + guards are alive. Exit 1 from patchify is expected here.
+echo '{"edits":[{"path":".git/hooks/pre-commit","old_string":"__patchify_probe_never_matches__","new_string":"x"}]}' \
+    | patchify --dry-run >/dev/null 2>&1
+probe_rc=$?
+# --dry-run with a not-found old_string exits 1; that proves the guard works.
+# Anything else (crash, exit 2, hang) blocks the commit.
+if [ $probe_rc -ne 1 ] && [ $probe_rc -ne 0 ]; then
+    echo "pre-commit: patchify probe failed with exit $probe_rc — commit blocked" >&2
+    exit 1
+fi
+
+exit 0

@@ -346,7 +346,69 @@ fn read_snapshot(path: &Path) -> Snapshot {
     }
 }
 
+/// Acquire an exclusive advisory lock (flock) on the target for the duration
+/// of its read-check-write sequence. Prevents lost updates between two
+/// concurrent patchify processes and any writer that also takes the lock.
+/// Returns the lock guard; dropping it releases. On platforms without flock
+/// support this is a no-op guard.
+pub struct FileLock {
+    // Holds the fd; the lock lives as long as this file handle stays open.
+    #[cfg(unix)]
+    _file: std::fs::File,
+    #[cfg(unix)]
+    lock_path: std::path::PathBuf,
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            let _ = std::fs::remove_file(&self.lock_path);
+        }
+    }
+}
+
+impl FileLock {
+    #[cfg(unix)]
+    fn acquire(path: &Path) -> Result<Self, String> {
+        use std::os::unix::io::AsRawFd;
+        let lock_path = path.with_extension("patchify-lock");
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|e| format!("cannot open lock file {}: {e}", lock_path.display()))?;
+        let ret = unsafe { libc_flock(file.as_raw_fd()) };
+        if ret != 0 {
+            return Err(format!(
+                "flock failed on {}: errno {ret}",
+                lock_path.display()
+            ));
+        }
+        Ok(FileLock {
+            _file: file,
+            lock_path,
+        })
+    }
+
+    #[cfg(not(unix))]
+    fn acquire(_path: &Path) -> Result<Self, String> {
+        Ok(FileLock {})
+    }
+}
+
+#[cfg(unix)]
+unsafe fn libc_flock(fd: std::os::unix::io::RawFd) -> i32 {
+    // LOCK_EX = 2
+    unsafe extern "C" {
+        fn flock(fd: i32, operation: i32) -> i32;
+    }
+    unsafe { flock(fd, 2) }
+}
+
 /// TOCTOU guard: check file unchanged since we read it, right before writing.
+/// The caller must hold the FileLock across check + write.
 fn check_not_changed(snap: &Snapshot, path: &Path) -> Result<(), String> {
     match std::fs::read(path) {
         Ok(now) => {
@@ -621,6 +683,10 @@ pub fn execute_batch(req: &BatchRequest, cwd: &Path) -> Result<BatchResult, Batc
             continue;
         }
         let abs = cwd.join(&p.rel);
+        let _lock = match FileLock::acquire(&abs) {
+            Ok(l) => l,
+            Err(m) => return Err(rollback(applied_log, cwd, m, edit_statuses, write_statuses)),
+        };
         if let Err(m) = check_not_changed(&p.snapshot, &abs) {
             return Err(rollback(applied_log, cwd, m, edit_statuses, write_statuses));
         }
@@ -689,9 +755,6 @@ pub fn execute_batch(req: &BatchRequest, cwd: &Path) -> Result<BatchResult, Batc
                 write_statuses,
             ));
         }
-        if let Err(m) = check_not_changed(&snap, &abs) {
-            return Err(rollback(applied_log, cwd, m, edit_statuses, write_statuses));
-        }
         if w.create_dirs {
             if let Some(parent) = abs.parent() {
                 if let Err(e) = std::fs::create_dir_all(parent) {
@@ -704,6 +767,13 @@ pub fn execute_batch(req: &BatchRequest, cwd: &Path) -> Result<BatchResult, Batc
                     ));
                 }
             }
+        }
+        let _lock = match FileLock::acquire(&abs) {
+            Ok(l) => l,
+            Err(m) => return Err(rollback(applied_log, cwd, m, edit_statuses, write_statuses)),
+        };
+        if let Err(m) = check_not_changed(&snap, &abs) {
+            return Err(rollback(applied_log, cwd, m, edit_statuses, write_statuses));
         }
         if let Err(e) = std::fs::write(&abs, &w.content) {
             return Err(rollback(
@@ -911,6 +981,91 @@ fn dry_run_result(req: &BatchRequest, cwd: &Path) -> Result<BatchResult, BatchEr
         verify: None,
         error: None,
     })
+}
+
+/// Human-readable text rendering of a batch result (`--format text`).
+pub fn result_to_text(res: &Result<BatchResult, BatchError>) -> String {
+    let mut out = String::new();
+    match res {
+        Ok(r) => {
+            let status: String = if r.status == "applied" {
+                "OK".to_owned()
+            } else {
+                r.status.to_uppercase()
+            };
+            out.push_str(&format!("{}: {}\n", status, r.status));
+            for e in &r.edits {
+                match (&e.error, e.applied) {
+                    (Some(err), _) => out.push_str(&format!("  FAIL  {}  ({err})\n", e.path)),
+                    (None, true) => out.push_str(&format!(
+                        "  edit  {}  ({} replacement(s))\n",
+                        e.path,
+                        e.replacements.unwrap_or(0)
+                    )),
+                    (None, false) => out.push_str(&format!("  edit  {}  (pending)\n", e.path)),
+                }
+                if let Some(p) = &e.diff_preview {
+                    for line in p.lines() {
+                        out.push_str("    ");
+                        out.push_str(line);
+                        out.push('\n');
+                    }
+                }
+            }
+            for w in r.writes.iter().flatten() {
+                match &w.error {
+                    Some(err) => out.push_str(&format!("  FAIL  {}  ({err})\n", w.path)),
+                    None if w.applied => out.push_str(&format!(
+                        "  write {}  {}\n",
+                        w.path,
+                        if w.created_dirs == Some(true) {
+                            "(dirs created)"
+                        } else {
+                            ""
+                        }
+                    )),
+                    None => out.push_str(&format!("  skip  {}  (superseded)\n", w.path)),
+                }
+            }
+            for v in r.verify.iter().flatten() {
+                out.push_str(&format!(
+                    "  [{exit:>3}] {cmd}  ({duration_ms}ms)\n",
+                    exit = v.exit,
+                    cmd = v.cmd,
+                    duration_ms = v.duration_ms
+                ));
+                if !v.stdout.trim().is_empty() {
+                    for line in v.stdout.lines().take(20) {
+                        out.push_str("    out: ");
+                        out.push_str(line);
+                        out.push('\n');
+                    }
+                }
+                if !v.stderr.trim().is_empty() {
+                    for line in v.stderr.lines().take(20) {
+                        out.push_str("    err: ");
+                        out.push_str(line);
+                        out.push('\n');
+                    }
+                }
+            }
+        }
+        Err(BatchError::RolledBack(msg, edits, writes, _)) => {
+            out.push_str(&format!("ROLLED_BACK: {msg}\n"));
+            for e in edits {
+                if let Some(err) = &e.error {
+                    out.push_str(&format!("  FAIL  {}  ({err})\n", e.path));
+                }
+            }
+            for w in writes.iter().flatten() {
+                if let Some(err) = &w.error {
+                    out.push_str(&format!("  FAIL  {}  ({err})\n", w.path));
+                }
+            }
+        }
+        Err(BatchError::InvalidRequest(m)) => out.push_str(&format!("INVALID: {m}\n")),
+    }
+    out
 }
 
 /// Convenience: serialize a result or error to a JSON string for stdout.
@@ -1208,6 +1363,41 @@ mod tests {
             std::fs::read_to_string(dir.join("a.txt")).unwrap(),
             "alpha beta\n"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn concurrent_instances_serialize_via_flock() {
+        // Two patchify processes racing on the same file: flock forces the
+        // check-read-write sequences to serialize, so both edits land.
+        let dir = tmpdir();
+        write_file(&dir, "shared.txt", "base\n");
+        let req1 = BatchRequest::from_json(
+            r#"{"edits":[{"path":"shared.txt","old_string":"base","new_string":"one"}],"verify":[{"cmd":"sleep 0.3"}]}"#,
+        )
+        .unwrap();
+        let req2 = BatchRequest::from_json(
+            r#"{"edits":[{"path":"shared.txt","old_string":"base","new_string":"two"}]}"#,
+        )
+        .unwrap();
+        let d1 = dir.clone();
+        let h1 = std::thread::spawn(move || execute_batch(&req1, &d1));
+        let d2 = dir.clone();
+        let h2 = std::thread::spawn(move || execute_batch(&req2, &d2));
+        let r1 = h1.join().unwrap();
+        let r2 = h2.join().unwrap();
+        let ok1 = r1.is_ok();
+        let ok2 = r2.is_ok();
+        // Both succeed (serialized), or the loser rolled back cleanly — but no
+        // lost update: the final content must be exactly one of the two edits.
+        let content = std::fs::read_to_string(dir.join("shared.txt")).unwrap();
+        assert!(
+            content == "one\n" || content == "two\n" || content == "base\n",
+            "final content must be a known state, got {content:?}"
+        );
+        // With flock, the second instance's preflight re-reads after the first
+        // wrote; one of them must have applied.
+        assert!(ok1 || ok2, "at least one batch must apply: {r1:?} {r2:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

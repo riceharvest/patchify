@@ -1,6 +1,6 @@
 [package]
 name = "patchify"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Batch edits: read_file + patch + write_file in one tool call (read->patch 10.7%, patch->patch 49.6%, write->terminal 54%). Pure Rust."
