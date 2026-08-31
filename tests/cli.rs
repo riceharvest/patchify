@@ -190,6 +190,48 @@ fn traversal_and_absolute_refused_via_cli() {
 }
 
 #[test]
+fn diff_mode_prints_unified_diff_and_writes_nothing() {
+    let dir = fixture_repo();
+    let before = std::fs::read_to_string(dir.join("main.rs")).unwrap();
+    let payload = r#"{"edits":[{"path":"main.rs","old_string":"hello","new_string":"goodbye"}]}"#;
+    let (code, stdout, _) = run_with_stdin(&["--diff"], payload, &dir);
+    assert_eq!(code, Some(0), "{stdout}");
+    assert!(stdout.contains("--- a/main.rs"), "{stdout}");
+    assert!(stdout.contains("+++ b/main.rs"), "{stdout}");
+    assert!(stdout.contains("-     println!(\"hello\");"), "{stdout}");
+    assert!(stdout.contains("+     println!(\"goodbye\");"), "{stdout}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("main.rs")).unwrap(),
+        before
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn text_format_prints_human_readable_summary() {
+    let dir = fixture_repo();
+    let payload = r#"{
+        "edits": [{"path": "main.rs", "old_string": "hello", "new_string": "goodbye"}],
+        "verify": [{"cmd": "cat main.rs"}]
+    }"#;
+    let (code, stdout, _) = run_with_stdin(&["--format", "text"], payload, &dir);
+    assert_eq!(code, Some(0), "{stdout}");
+    assert!(stdout.contains("OK: applied"), "{stdout}");
+    assert!(stdout.contains("edit  main.rs"), "{stdout}");
+    assert!(stdout.contains("[  0] cat main.rs"), "{stdout}");
+    // rollback en texto
+    let payload_bad = r#"{"edits":[{"path":"main.rs","old_string":"missing","new_string":"x"}]}"#;
+    let (code, stdout, _) = run_with_stdin(&["--format", "text"], payload_bad, &dir);
+    assert_eq!(code, Some(1));
+    assert!(stdout.contains("ROLLED_BACK"), "{stdout}");
+    // parse failure respet --format text (exit 2)
+    let (code, stdout, _) = run_with_stdin(&["--format", "text"], "not-json", &dir);
+    assert_eq!(code, Some(2));
+    assert!(stdout.contains("INVALID"), "{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn input_file_flag_reads_request_from_disk() {
     let dir = fixture_repo();
     std::fs::write(

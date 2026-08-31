@@ -988,10 +988,10 @@ pub fn result_to_text(res: &Result<BatchResult, BatchError>) -> String {
     let mut out = String::new();
     match res {
         Ok(r) => {
-            let status: String = if r.status == "applied" {
-                "OK".to_owned()
+            let status = if r.status == "applied" {
+                "OK"
             } else {
-                r.status.to_uppercase()
+                r.status.as_str()
             };
             out.push_str(&format!("{}: {}\n", status, r.status));
             for e in &r.edits {
