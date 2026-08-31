@@ -7,6 +7,7 @@
 //! same response.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
 pub mod update;
@@ -397,7 +398,8 @@ pub fn execute_batch(req: &BatchRequest, cwd: &Path) -> Result<BatchResult, Batc
         let p = safe_relative_path(&e.path).map_err(BatchError::InvalidRequest)?;
         if p.is_absolute() && !req.allow_outside {
             return Err(BatchError::InvalidRequest(format!(
-                "edit[{i}]: absolute path refused: {} (set allow_outside to edit outside the tree)", e.path
+                "edit[{i}]: absolute path refused: {} (set allow_outside to edit outside the tree)",
+                e.path
             )));
         }
     }
@@ -405,7 +407,8 @@ pub fn execute_batch(req: &BatchRequest, cwd: &Path) -> Result<BatchResult, Batc
         let p = safe_relative_path(&w.path).map_err(BatchError::InvalidRequest)?;
         if p.is_absolute() && !req.allow_outside {
             return Err(BatchError::InvalidRequest(format!(
-                "write[{i}]: absolute path refused: {} (set allow_outside to write outside the tree)", w.path
+                "write[{i}]: absolute path refused: {} (set allow_outside to write outside the tree)",
+                w.path
             )));
         }
     }
@@ -428,6 +431,11 @@ pub fn execute_batch(req: &BatchRequest, cwd: &Path) -> Result<BatchResult, Batc
 
     let mut failure: Option<(usize, String)> = None;
 
+    // Pre-read cache so chained edits to the SAME path compose: each edit
+    // matches against the previous edit's result, not stale disk content.
+    let mut preflight_cache: HashMap<String, String> = HashMap::new();
+    let mut preflight_orig: HashMap<String, Vec<u8>> = HashMap::new();
+
     for (i, e) in req.edits.iter().enumerate() {
         let rel = match safe_relative_path(&e.path) {
             Ok(r) => r,
@@ -444,6 +452,7 @@ pub fn execute_batch(req: &BatchRequest, cwd: &Path) -> Result<BatchResult, Batc
                 break;
             }
         };
+        let cache_key = rel.to_string_lossy().into_owned();
         let abs = cwd.join(&rel);
         if !req.allow_outside && !resolves_inside(&abs, cwd, 8) {
             failure = Some((
@@ -463,26 +472,39 @@ pub fn execute_batch(req: &BatchRequest, cwd: &Path) -> Result<BatchResult, Batc
             });
             break;
         }
-        let snapshot = read_snapshot(&abs);
-        if !snapshot.existed {
-            failure = Some((
-                i,
-                format!(
-                    "edit target does not exist: {} (use writes to create files)",
-                    e.path
-                ),
-            ));
-            edit_statuses.push(EditStatus {
-                path: e.path.clone(),
-                ok: false,
-                applied: false,
-                error: Some("target missing".into()),
-                diff_preview: None,
-                replacements: None,
-            });
-            break;
-        }
-        let bytes = snapshot.content.clone().unwrap();
+        let (snapshot, bytes) = if let Some(cached) = preflight_cache.get(&cache_key) {
+            // Chained same-path edit: match against the previous edit's result.
+            let orig = preflight_orig.get(&cache_key).unwrap().clone();
+            (
+                Snapshot {
+                    existed: true,
+                    content: Some(orig),
+                },
+                cached.clone().into_bytes(),
+            )
+        } else {
+            let snapshot = read_snapshot(&abs);
+            if !snapshot.existed {
+                failure = Some((
+                    i,
+                    format!(
+                        "edit target does not exist: {} (use writes to create files)",
+                        e.path
+                    ),
+                ));
+                edit_statuses.push(EditStatus {
+                    path: e.path.clone(),
+                    ok: false,
+                    applied: false,
+                    error: Some("target missing".into()),
+                    diff_preview: None,
+                    replacements: None,
+                });
+                break;
+            }
+            let bytes = snapshot.content.clone().unwrap();
+            (snapshot, bytes)
+        };
         if bytes.len() as u64 > MAX_FILE_BYTES {
             failure = Some((
                 i,
@@ -552,6 +574,10 @@ pub fn execute_batch(req: &BatchRequest, cwd: &Path) -> Result<BatchResult, Batc
             });
             break;
         };
+        preflight_cache.insert(cache_key.clone(), new_content.clone());
+        preflight_orig
+            .entry(cache_key.clone())
+            .or_insert_with(|| bytes.clone());
         prepared.push(PreparedEdit {
             rel,
             content: bytes,
@@ -578,7 +604,22 @@ pub fn execute_batch(req: &BatchRequest, cwd: &Path) -> Result<BatchResult, Batc
     let mut write_statuses: Vec<WriteStatus> = Vec::new();
     let mut verify_statuses: Vec<VerifyStatus> = Vec::new();
 
+    // Compute the last prepared index per path: chained same-path edits
+    // collapse into one disk write (the final composed content).
+    let mut last_idx_for_path: HashMap<String, usize> = HashMap::new();
+    for (idx, p) in prepared.iter().enumerate() {
+        last_idx_for_path.insert(p.rel.to_string_lossy().into_owned(), idx);
+    }
+
     for (idx, mut p) in prepared.into_iter().enumerate() {
+        let is_last_for_path =
+            last_idx_for_path.get(&p.rel.to_string_lossy().into_owned()) == Some(&idx);
+        if !is_last_for_path {
+            // Intermediate edit in a same-path chain: result is already folded
+            // into the chain's final content; nothing to write here.
+            edit_statuses[idx].applied = true;
+            continue;
+        }
         let abs = cwd.join(&p.rel);
         if let Err(m) = check_not_changed(&p.snapshot, &abs) {
             return Err(rollback(applied_log, cwd, m, edit_statuses, write_statuses));
@@ -598,6 +639,9 @@ pub fn execute_batch(req: &BatchRequest, cwd: &Path) -> Result<BatchResult, Batc
         });
         p.snapshot.content = Some(p.new_content.clone().into_bytes());
         edit_statuses[idx].applied = true;
+        // Per-step diff: p.content is what this edit matched against (the
+        // original for the first edit on a path, the previous edit's result
+        // for chained same-path edits).
         edit_statuses[idx].diff_preview = Some(diff_preview(
             &String::from_utf8_lossy(&p.content),
             &p.new_content,
@@ -1065,7 +1109,8 @@ mod tests {
     }
 
     #[test]
-    fn symlink_escape_refused() {
+    fn symlinked_dir_escape_refused() {
+        // Symlinked DIRECTORY pointing outside cwd: writing through it is refused.
         let dir = tmpdir();
         let outside = tmpdir();
         write_file(&outside, "secret.txt", "secret\n");
@@ -1164,6 +1209,108 @@ mod tests {
             "alpha beta\n"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn toctou_guard_fires_on_drift() {
+        let dir = tmpdir();
+        write_file(&dir, "x.txt", "before\n");
+        let snap = read_snapshot(&dir.join("x.txt"));
+        // external writer lands between snapshot and write
+        std::fs::write(dir.join("x.txt"), "clobbered\n").unwrap();
+        assert!(
+            check_not_changed(&snap, &dir.join("x.txt")).is_err(),
+            "guard must fire on drift"
+        );
+        // restored content passes
+        std::fs::write(dir.join("x.txt"), "before\n").unwrap();
+        assert!(check_not_changed(&snap, &dir.join("x.txt")).is_ok());
+        // vanished file with snapshot errors
+        std::fs::remove_file(dir.join("x.txt")).unwrap();
+        assert!(check_not_changed(&snap, &dir.join("x.txt")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chained_same_path_edits_compose() {
+        let dir = tmpdir();
+        write_file(&dir, "f.txt", "alpha beta gamma\n");
+        let req = BatchRequest::from_json(
+            r#"{"edits":[
+                {"path":"f.txt","old_string":"alpha","new_string":"ALPHA"},
+                {"path":"f.txt","old_string":"beta","new_string":"BETA"},
+                {"path":"f.txt","old_string":"gamma","new_string":"GAMMA"}
+            ]}"#,
+        )
+        .unwrap();
+        let res = execute_batch(&req, &dir).unwrap();
+        assert!(res.ok, "{res:?}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("f.txt")).unwrap(),
+            "ALPHA BETA GAMMA\n"
+        );
+        // second edit matched against first edit's output
+        assert_eq!(res.edits[1].replacements, Some(1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chained_edit_matching_previous_output() {
+        let dir = tmpdir();
+        write_file(&dir, "f.txt", "v1\n");
+        let req = BatchRequest::from_json(
+            r#"{"edits":[
+                {"path":"f.txt","old_string":"v1","new_string":"v2"},
+                {"path":"f.txt","old_string":"v2","new_string":"v3"}
+            ]}"#,
+        )
+        .unwrap();
+        let res = execute_batch(&req, &dir).unwrap();
+        assert!(res.ok, "{res:?}");
+        assert_eq!(std::fs::read_to_string(dir.join("f.txt")).unwrap(), "v3\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chained_edit_failure_rolls_back_chain() {
+        let dir = tmpdir();
+        write_file(&dir, "f.txt", "x1\n");
+        let req = BatchRequest::from_json(
+            r#"{"edits":[
+                {"path":"f.txt","old_string":"x1","new_string":"x2"},
+                {"path":"f.txt","old_string":"nope","new_string":"q"}
+            ]}"#,
+        )
+        .unwrap();
+        match execute_batch(&req, &dir) {
+            Err(BatchError::RolledBack(..)) => {}
+            other => panic!("expected rollback, got {other:?}"),
+        }
+        assert_eq!(std::fs::read_to_string(dir.join("f.txt")).unwrap(), "x1\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn symlink_escape_refused_real() {
+        let dir = tmpdir();
+        let outside = tmpdir();
+        write_file(&outside, "secret.txt", "secret\n");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.join("secret.txt"), dir.join("link.txt")).unwrap();
+        let req = BatchRequest::from_json(
+            r#"{"edits":[{"path":"link.txt","old_string":"secret","new_string":"owned"}]}"#,
+        )
+        .unwrap();
+        match execute_batch(&req, &dir) {
+            Err(BatchError::RolledBack(m, ..)) => assert!(m.contains("outside"), "{m}"),
+            other => panic!("expected outside-cwd refusal, got {other:?}"),
+        }
+        assert_eq!(
+            std::fs::read_to_string(outside.join("secret.txt")).unwrap(),
+            "secret\n"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]

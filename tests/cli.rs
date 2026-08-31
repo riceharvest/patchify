@@ -190,6 +190,45 @@ fn traversal_and_absolute_refused_via_cli() {
 }
 
 #[test]
+fn input_file_flag_reads_request_from_disk() {
+    let dir = fixture_repo();
+    std::fs::write(
+        dir.join("req.json"),
+        r#"{"edits":[{"path":"README","old_string":"demo","new_string":"DEMO"}]}"#,
+    )
+    .unwrap();
+    let (code, stdout, _) = run_binary(&["--input", "req.json"], "", &dir);
+    assert_eq!(code, Some(0), "{stdout}");
+    assert!(stdout.contains("\"applied\""), "{stdout}");
+    assert!(
+        std::fs::read_to_string(dir.join("README"))
+            .unwrap()
+            .contains("DEMO")
+    );
+    // missing file -> exit 2
+    let (code, _, _) = run_binary(&["--input", "nope.json"], "", &dir);
+    assert_eq!(code, Some(2));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn chained_same_path_edits_via_cli() {
+    let dir = fixture_repo();
+    let payload = r#"{"edits":[
+        {"path":"main.rs","old_string":"hello","new_string":"goodbye"},
+        {"path":"main.rs","old_string":"goodbye","new_string":"farewell"}
+    ]}"#;
+    let (code, stdout, _) = run_with_stdin(&[], payload, &dir);
+    assert_eq!(code, Some(0), "{stdout}");
+    assert!(
+        std::fs::read_to_string(dir.join("main.rs"))
+            .unwrap()
+            .contains("farewell")
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn tool_manifest_and_completions_and_man_render() {
     let dir = fixture_repo();
     let (code, out, _) = run_binary(&["--tool-manifest"], "", &dir);

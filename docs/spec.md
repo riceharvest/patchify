@@ -4,11 +4,11 @@ This document is normative for the `patchify` command. Behavior not specified he
 
 ## Command contract
 
-`patchify` reads a `BatchRequest` JSON document from stdin (or `--input FILE`) and writes a single `BatchResult` JSON document to stdout. `--help` and `--version` succeed without input. Empty or unparseable input exits with code 2.
+`patchify` reads a `BatchRequest` JSON document from stdin (or `--input FILE`; `--input -` reads stdin explicitly) and writes a single `BatchResult` JSON document to stdout. `--help` and `--version` succeed without input. Empty or unparseable input exits with code 2.
 
 ## Request contract
 
-- `edits[]`: `{path, old_string, new_string, replace_all?}`. Applied in order. `old_string` must occur exactly once in the target file unless `replace_all: true`; zero or multiple matches fail the batch. `old_string` must be non-empty. Exact byte matching, no regex.
+- `edits[]`: `{path, old_string, new_string, replace_all?}`. Applied in order. `old_string` must occur exactly once in the target file unless `replace_all: true`; zero or multiple matches fail the batch. `old_string` must be non-empty. Exact byte matching, no regex. Multiple edits to the same path compose: each edit matches against the previous edit's result (the batch writes the composed content once).
 - `writes[]`: `{path, content, create_dirs?}`. Create or overwrite files; parent directories created when `create_dirs` (default true). Duplicate paths: last write wins.
 - `verify[]`: `{cmd}`. Shell commands run after all edits and writes land, via `sh -c` (Windows: `cmd /C`) with the working directory as cwd. stdout/stderr capped at 4000 chars in output.
 - `dry_run: true`: validate and return diff previews without writing anything.
@@ -25,6 +25,10 @@ This document is normative for the `patchify` command. Behavior not specified he
 | verify stdout/stderr cap | 4000 chars each |
 | `dry_run` | false |
 | `allow_outside` | false |
+
+## Ordering
+
+Edits apply before writes. All edits execute first (same-path edits composing in order), then all writes, then verify commands. A write to a path that was also edited overwrites the edit; the result reports both operations as applied.
 
 ## Atomicity and rollback
 

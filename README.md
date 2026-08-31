@@ -80,7 +80,7 @@ and every per-edit status explains what happened — no re-reading needed.
 
 | Flag | Meaning |
 | --- | --- |
-| `--input FILE` | Read request JSON from FILE instead of stdin |
+| `--input FILE` | Read request JSON from FILE (`-` = stdin) |
 | `--dry-run` | Force dry-run regardless of JSON |
 | `--allow-outside` | Allow paths outside cwd (unsafe opt-in) |
 | `--cwd DIR` | Base directory for relative paths |
@@ -102,6 +102,7 @@ and every per-edit status explains what happened — no re-reading needed.
 
 - Edits apply in order with **atomic rollback**: one mismatch (0 or >1 matches)
   undoes everything already applied in the batch.
+- Chained same-path edits compose: each edit matches the previous edit's result.
 - Exact string matching, no regex, no fuzzy matching.
 - Path traversal (`../`), absolute paths, and symlink escapes out of the working
   directory are refused unless `allow_outside` is set.

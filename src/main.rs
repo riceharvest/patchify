@@ -55,9 +55,14 @@ fn main() -> ExitCode {
                 eprintln!("patchify: failed to read stdin");
                 return ExitCode::from(2);
             }
-        } else if let Err(e) = std::fs::read_to_string(path) {
-            eprintln!("patchify: cannot read {path:?}: {e}");
-            return ExitCode::from(2);
+        } else {
+            match std::fs::read_to_string(path) {
+                Ok(content) => payload = content,
+                Err(e) => {
+                    eprintln!("patchify: cannot read {path:?}: {e}");
+                    return ExitCode::from(2);
+                }
+            }
         }
     } else if std::io::stdin().read_to_string(&mut payload).is_err() {
         eprintln!("patchify: failed to read stdin (pipe BatchRequest JSON, or use --input FILE)");
