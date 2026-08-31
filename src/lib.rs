@@ -1,4 +1,4 @@
-//! agentic-edit - Fixes read->patch verification loops and patch->patch bursts atomically with rollback.
+//! patchify - Fixes read->patch verification loops and patch->patch bursts atomically with rollback.
 pub mod update;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ pub struct BatchResult {
 
 /// Batch entry point - implement real batching here.
 pub async fn batch(req: BatchRequest) -> Result<Vec<BatchResult>> {
-    // TODO: implement batched agentic-edit logic
+    // TODO: implement batched patchify logic
     let _ = req;
     Ok(vec![])
 }

@@ -1,14 +1,14 @@
 #!/bin/sh
 # recurlsively installer — POSIX, fail-closed.
 # Usage: curl -fsSL https://raw.githubusercontent.com/riceharvest/recurlsively/main/install.sh | sh
-# Override version: AGENTIC_EDIT_VERSION=v0.1.0 sh install.sh
+# Override version: PATCHIFY_VERSION=v0.1.0 sh install.sh
 set -eu
 
-REPO="riceharvest/agentic-edit"
-BIN="agentic-edit"
-INSTALL_DIR="${AGENTIC_EDIT_INSTALL_DIR:-$HOME/.local/bin}"
+REPO="riceharvest/patchify"
+BIN="patchify"
+INSTALL_DIR="${PATCHIFY_INSTALL_DIR:-$HOME/.local/bin}"
 
-log() { printf 'agentic-edit-installer: %s\n' "$1" >&2; }
+log() { printf 'patchify-installer: %s\n' "$1" >&2; }
 fail() { log "ERROR: $1"; exit 1; }
 
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 ||
@@ -50,13 +50,13 @@ esac
 
 TARGET="${arch_component}-${os_component}"
 
-if [ -n "${AGENTIC_EDIT_VERSION:-}" ]; then
-  VERSION="$AGENTIC_EDIT_VERSION"
+if [ -n "${PATCHIFY_VERSION:-}" ]; then
+  VERSION="$PATCHIFY_VERSION"
 else
   log "resolving latest release..."
   VERSION=$(fetch "https://api.github.com/repos/$REPO/releases/latest" |
     sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
-  [ -n "$VERSION" ] || fail "could not determine latest release (set AGENTIC_EDIT_VERSION to pin one)"
+  [ -n "$VERSION" ] || fail "could not determine latest release (set PATCHIFY_VERSION to pin one)"
 fi
 
 BASE_URL="https://github.com/$REPO/releases/download/$VERSION"

@@ -1,7 +1,7 @@
 //! `agentic-edit --update` — self-update from GitHub Releases.
 
-const REPO: &str = "riceharvest/agentic-edit";
-const BIN: &str = "agentic-edit";
+const REPO: &str = "riceharvest/patchify";
+const BIN: &str = "patchify";
 
 #[derive(Debug)]
 pub enum UpdateError {
