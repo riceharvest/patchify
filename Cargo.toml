@@ -1,0 +1,38 @@
+[package]
+name = "agentic-edit"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Batch edits: read_file + patch + write_file in one tool call (read->patch 10.7%, patch->patch 49.6%, write->terminal 54%). Pure Rust."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/riceharvest/agentic-edit"
+keywords = ["agentic","hermes","batch","tool"]
+categories = ["development-tools"]
+
+[[bin]]
+name = "agentic-edit"
+path = "src/main.rs"
+
+[lib]
+name = "agentic_edit"
+path = "src/lib.rs"
+
+[workspace]
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread","macros","time","sync","fs","process","io-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls","gzip","http2","json"] }
+sha2 = "0.10"
+url = "2.5"
+flate2 = "1"
+tar = "0.4"
+
+tempfile = "3"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
